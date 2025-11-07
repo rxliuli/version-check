@@ -1,0 +1,30 @@
+name: 'Universal Version Check'
+description: 'Check version changes in any file format (JSON, YAML, TOML, XML)'
+author: 'rxliuli'
+
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  file-name:
+    description: 'File path with optional query (e.g., ./config.yml#info.version or ./package.json#version)'
+    required: true
+  diff-search:
+    description: 'Compare with previous commit to detect version changes'
+    required: false
+    default: 'false'
+
+outputs:
+  changed:
+    description: 'Whether the version changed (true/false)'
+  version:
+    description: 'Current version number'
+  previous_version:
+    description: 'Previous version number (only if diff-search is true)'
+  type:
+    description: 'Type of version change (major/minor/patch/prerelease)'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
