@@ -1,6 +1,6 @@
 {
   "name": "version-check",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A GitHub Action to check version changes in any file format",
   "type": "module",
   "main": "dist/index.js",
