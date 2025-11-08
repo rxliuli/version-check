@@ -1,22 +1,14 @@
 import * as core from '@actions/core'
-import * as github from '@actions/github'
 import { parseFile, extractVersion } from './parsers'
 import { getPreviousFileContent } from './git'
-import { compareVersions, determineVersionChangeType } from './version'
+import { determineVersionChangeType } from './version'
 
 async function run(): Promise<void> {
   try {
-    const fileName = core.getInput('file-name', { required: true })
-    const diffSearch = core.getInput('diff-search') === 'true'
+    const filePath = core.getInput('file', { required: true })
+    const query = core.getInput('query') || 'version'
 
-    core.info(`Checking version in file: ${fileName}`)
-
-    // Parse file path and query
-    const [filePath, query] = fileName.includes('#')
-      ? fileName.split('#')
-      : [fileName, 'version']
-
-    core.info(`File path: ${filePath}`)
+    core.info(`Checking version in file: ${filePath}`)
     core.info(`Query path: ${query}`)
 
     // Get current version
@@ -24,44 +16,44 @@ async function run(): Promise<void> {
     core.setOutput('version', currentVersion)
     core.info(`Current version: ${currentVersion}`)
 
-    if (diffSearch) {
-      try {
-        // Get previous file content
-        const previousContent = await getPreviousFileContent(filePath)
-        
-        if (previousContent) {
-          // Parse previous version
-          const fileExtension = filePath.split('.').pop() || 'json'
-          const previousData = parseFile(previousContent, fileExtension)
-          const previousVersion = getValueByPath(previousData, query)
+    try {
+      // Get previous file content
+      const previousContent = await getPreviousFileContent(filePath)
 
-          core.setOutput('previous_version', previousVersion)
-          core.info(`Previous version: ${previousVersion}`)
+      if (previousContent) {
+        // Parse previous version
+        const fileExtension = filePath.split('.').pop() || 'json'
+        const previousData = parseFile(previousContent, fileExtension)
+        const previousVersion = getValueByPath(previousData, query)
 
-          // Compare versions
-          const changed = currentVersion !== previousVersion
-          core.setOutput('changed', changed.toString())
+        core.setOutput('previous_version', previousVersion)
+        core.info(`Previous version: ${previousVersion}`)
 
-          if (changed) {
-            // Determine version change type
-            const changeType = determineVersionChangeType(previousVersion, currentVersion)
-            core.setOutput('type', changeType)
-            core.info(`Version changed: ${previousVersion} → ${currentVersion} (${changeType})`)
-          } else {
-            core.info('Version unchanged')
-          }
+        // Compare versions
+        const changed = currentVersion !== previousVersion
+        core.setOutput('changed', changed.toString())
+
+        if (changed) {
+          // Determine version change type
+          const changeType = determineVersionChangeType(
+            previousVersion,
+            currentVersion,
+          )
+          core.setOutput('type', changeType)
+          core.info(
+            `Version changed: ${previousVersion} → ${currentVersion} (${changeType})`,
+          )
         } else {
-          // No previous version (first commit)
-          core.setOutput('changed', 'true')
-          core.info('No previous version found (possibly first commit)')
+          core.info('Version unchanged')
         }
-      } catch (error) {
-        core.warning(`Could not get previous version: ${error}`)
-        core.setOutput('changed', 'false')
+      } else {
+        // No previous version (first commit)
+        core.setOutput('changed', 'true')
+        core.info('No previous version found (possibly first commit)')
       }
-    } else {
-      // If not doing diff search, always mark as changed
-      core.setOutput('changed', 'true')
+    } catch (error) {
+      core.warning(`Could not get previous version: ${error}`)
+      core.setOutput('changed', 'false')
     }
   } catch (error) {
     if (error instanceof Error) {
@@ -80,4 +72,11 @@ function getValueByPath(obj: any, path: string): string {
     if (current && typeof current === 'object' && key in current) {
       current = current[key]
     } else {
-      throw new Error(`Path \
+      throw new Error(`Path "${path}" not found in object`)
+    }
+  }
+
+  return String(current)
+}
+
+run()

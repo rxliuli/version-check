@@ -37,4 +37,9 @@ export async function extractVersion(filePath: string, queryPath: string): Promi
     if (current && typeof current === 'object' && key in current) {
       current = current[key]
     } else {
-      throw new Error(`Path \
+      throw new Error(`Path "${queryPath}" not found in ${filePath}`)
+    }
+  }
+
+  return String(current)
+}

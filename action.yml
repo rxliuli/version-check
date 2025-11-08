@@ -1,4 +1,4 @@
-name: 'Universal Version Check'
+name: 'Version Check'
 description: 'Check version changes in any file format (JSON, YAML, TOML, XML)'
 author: 'rxliuli'
 
@@ -7,13 +7,13 @@ branding:
   color: 'green'
 
 inputs:
-  file-name:
-    description: 'File path with optional query (e.g., ./config.yml#info.version or ./package.json#version)'
+  file:
+    description: 'Path to the file to check (e.g., ./package.json, ./Cargo.toml)'
     required: true
-  diff-search:
-    description: 'Compare with previous commit to detect version changes'
+  query:
+    description: 'Dot-notation path to the version field (e.g., "version" or "package.version")'
     required: false
-    default: 'false'
+    default: 'version'
 
 outputs:
   changed:
@@ -21,10 +21,10 @@ outputs:
   version:
     description: 'Current version number'
   previous_version:
-    description: 'Previous version number (only if diff-search is true)'
+    description: 'Previous version number'
   type:
     description: 'Type of version change (major/minor/patch/prerelease)'
 
 runs:
-  using: 'node20'
+  using: 'node24'
   main: 'dist/index.js'
