@@ -153,7 +153,7 @@ jobs:
           file: ./package.json
 
   release:
-    needs: [version]
+    needs: version
     if: needs.version.outputs.changed == 'true'
     runs-on: ubuntu-latest
     permissions:

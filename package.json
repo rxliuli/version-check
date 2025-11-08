@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsup src/index.ts --format esm",
+    "build": "ncc build src/index.ts -o dist",
     "dev": "tsx src/index.ts",
     "test": "vitest"
   },
@@ -25,6 +25,7 @@
   "devDependencies": {
     "@types/node": "^20.10.6",
     "@types/semver": "^7.5.6",
+    "@vercel/ncc": "^0.38.4",
     "tsup": "^8.5.0",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
