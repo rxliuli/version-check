@@ -3,18 +3,21 @@ import * as core from '@actions/core'
 
 export async function getPreviousFileContent(filePath: string): Promise<string | null> {
   try {
+    // Normalize file path (remove leading ./)
+    const normalizedPath = filePath.replace(/^\.\//, '')
+
     // Check if file was changed in the last commit
     const changedFiles = execSync('git diff --name-only HEAD~1..HEAD', {
       encoding: 'utf-8',
     }).trim()
 
-    if (!changedFiles.includes(filePath)) {
+    if (!changedFiles.split('\n').some(f => f === normalizedPath || f === filePath)) {
       core.info(`File ${filePath} was not changed in the last commit`)
       return null
     }
 
     // Get file content from previous commit
-    const previousContent = execSync(`git show HEAD~1:${filePath}`, {
+    const previousContent = execSync(`git show HEAD~1:${normalizedPath}`, {
       encoding: 'utf-8',
     })
 

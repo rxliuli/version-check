@@ -32334,16 +32334,18 @@ const child_process_1 = __nccwpck_require__(7698);
 const core = __importStar(__nccwpck_require__(6966));
 async function getPreviousFileContent(filePath) {
     try {
+        // Normalize file path (remove leading ./)
+        const normalizedPath = filePath.replace(/^\.\//, '');
         // Check if file was changed in the last commit
         const changedFiles = (0, child_process_1.execSync)('git diff --name-only HEAD~1..HEAD', {
             encoding: 'utf-8',
         }).trim();
-        if (!changedFiles.includes(filePath)) {
+        if (!changedFiles.split('\n').some(f => f === normalizedPath || f === filePath)) {
             core.info(`File ${filePath} was not changed in the last commit`);
             return null;
         }
         // Get file content from previous commit
-        const previousContent = (0, child_process_1.execSync)(`git show HEAD~1:${filePath}`, {
+        const previousContent = (0, child_process_1.execSync)(`git show HEAD~1:${normalizedPath}`, {
             encoding: 'utf-8',
         });
         return previousContent;

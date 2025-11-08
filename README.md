@@ -82,52 +82,15 @@ A GitHub Action to check version changes in any file format (JSON, YAML, TOML, e
 
 ## Workflow Examples
 
-### Simple Single-Job Workflow
-
-```yaml
-name: Release on Version Change
-
-on:
-  push:
-    branches: [main]
-
-jobs:
-  release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: Check version
-        id: version
-        uses: rxliuli/version-check@v1
-        with:
-          file: ./package.json
-
-      - name: Build
-        if: steps.version.outputs.changed == 'true'
-        run: |
-          npm install
-          npm run build
-
-      - name: Create Release
-        if: steps.version.outputs.changed == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: Release v${{ steps.version.outputs.version }}
-          files: |
-            dist/*
-```
-
-### Multi-Job Workflow (Chrome Extension Release)
+### Release Chrome Extension
 
 For complex workflows with multiple steps, using separate jobs with `needs` is cleaner than repeating `if` conditions:
 
 ```yaml
+env:
+  DIRECTORY: .output
+  PROJECT_NAME: redirector
+
 name: Release Chrome Extension
 
 on:
@@ -144,8 +107,6 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
       - name: Check version change
         id: version
         uses: rxliuli/version-check@v1
@@ -165,34 +126,25 @@ jobs:
           version: 'latest'
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install
-      - name: Build extension
-        run: pnpm run build
-      - name: Package extension
+      - name: Zip extensions
         run: |
           pnpm run zip
           pnpm run zip:firefox
-
-      - name: Create GitHub Release
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.version.outputs.version }}
-          name: v${{ needs.version.outputs.version }}
+          tag_name: 'v${{ needs.version.outputs.version }}'
+          name: 'v${{ needs.version.outputs.version }}'
+          draft: false
+          prerelease: false
           files: |
-            dist/extension-${{ needs.version.outputs.version }}-chrome.zip
-            dist/extension-${{ needs.version.outputs.version }}-firefox.zip
-
-      - name: Publish to Chrome Web Store
-        uses: mnao305/chrome-extension-upload@v5
-        with:
-          file-path: dist/extension-${{ needs.version.outputs.version }}-chrome.zip
-          extension-id: ${{ secrets.CHROME_EXTENSION_ID }}
-          client-id: ${{ secrets.CHROME_CLIENT_ID }}
-          client-secret: ${{ secrets.CHROME_CLIENT_SECRET }}
-          refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}
+            ${{ env.DIRECTORY }}/${{env.PROJECT_NAME}}-${{ needs.version.outputs.version }}-chrome.zip
+            ${{ env.DIRECTORY }}/${{env.PROJECT_NAME}}-${{ needs.version.outputs.version }}-firefox.zip
+            ${{ env.DIRECTORY }}/${{env.PROJECT_NAME}}-${{ needs.version.outputs.version }}-sources.zip
 ```
 
 ## How It Works
