@@ -16,6 +16,10 @@ A GitHub Action to check version changes in any file format (JSON, YAML, TOML, e
 ### Basic Example
 
 ```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 2  # Required to access previous commit
+
 - uses: rxliuli/version-check@v1
   id: version
   with:
@@ -32,6 +36,9 @@ A GitHub Action to check version changes in any file format (JSON, YAML, TOML, e
 #### package.json (JavaScript/TypeScript)
 
 ```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 2
 - uses: rxliuli/version-check@v1
   with:
     file: ./package.json
@@ -40,6 +47,9 @@ A GitHub Action to check version changes in any file format (JSON, YAML, TOML, e
 #### config.yml (YAML)
 
 ```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 2
 - uses: rxliuli/version-check@v1
   with:
     file: ./build/config.yml
@@ -49,6 +59,9 @@ A GitHub Action to check version changes in any file format (JSON, YAML, TOML, e
 #### Cargo.toml (Rust)
 
 ```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 2
 - uses: rxliuli/version-check@v1
   with:
     file: ./Cargo.toml
@@ -58,11 +71,26 @@ A GitHub Action to check version changes in any file format (JSON, YAML, TOML, e
 #### pyproject.toml (Python)
 
 ```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 2
 - uses: rxliuli/version-check@v1
   with:
     file: ./pyproject.toml
     query: project.version
 ```
+
+## Important Setup
+
+**⚠️ Required: You must use `fetch-depth: 2` (or higher) with `actions/checkout`**
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 2  # Required to access previous commit for comparison
+```
+
+Without this, the action cannot access the previous commit and will always report `changed: true` with no previous version.
 
 ## Inputs
 

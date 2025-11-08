@@ -32336,6 +32336,16 @@ async function getPreviousFileContent(filePath) {
     try {
         // Normalize file path (remove leading ./)
         const normalizedPath = filePath.replace(/^\.\//, '');
+        // Check if HEAD~1 exists (requires fetch-depth >= 2)
+        try {
+            (0, child_process_1.execSync)('git rev-parse HEAD~1', { encoding: 'utf-8', stdio: 'pipe' });
+        }
+        catch {
+            core.warning('Cannot access previous commit (HEAD~1). ' +
+                'Make sure to use "fetch-depth: 2" or higher with actions/checkout. ' +
+                'See: https://github.com/rxliuli/version-check#important-setup');
+            return null;
+        }
         // Check if file was changed in the last commit
         const changedFiles = (0, child_process_1.execSync)('git diff --name-only HEAD~1..HEAD', {
             encoding: 'utf-8',
@@ -32436,9 +32446,9 @@ async function run() {
                 }
             }
             else {
-                // No previous version (first commit)
-                core.setOutput('changed', 'true');
-                core.info('No previous version found (possibly first commit)');
+                // No previous version found - cannot determine if changed
+                core.setOutput('changed', 'false');
+                core.info('No previous version found - cannot determine version change');
             }
         }
         catch (error) {

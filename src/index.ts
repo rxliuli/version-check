@@ -47,9 +47,9 @@ async function run(): Promise<void> {
           core.info('Version unchanged')
         }
       } else {
-        // No previous version (first commit)
-        core.setOutput('changed', 'true')
-        core.info('No previous version found (possibly first commit)')
+        // No previous version found - cannot determine if changed
+        core.setOutput('changed', 'false')
+        core.info('No previous version found - cannot determine version change')
       }
     } catch (error) {
       core.warning(`Could not get previous version: ${error}`)
