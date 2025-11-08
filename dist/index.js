@@ -82,43 +82,42 @@ function determineVersionChangeType(previousVersion, currentVersion) {
 // src/index.ts
 async function run() {
   try {
-    const fileName = core2.getInput("file-name", { required: true });
-    const diffSearch = core2.getInput("diff-search") === "true";
-    core2.info(`Checking version in file: ${fileName}`);
-    const [filePath, query] = fileName.includes("#") ? fileName.split("#") : [fileName, "version"];
-    core2.info(`File path: ${filePath}`);
+    const filePath = core2.getInput("file", { required: true });
+    const query = core2.getInput("query") || "version";
+    core2.info(`Checking version in file: ${filePath}`);
     core2.info(`Query path: ${query}`);
     const currentVersion = await extractVersion(filePath, query);
     core2.setOutput("version", currentVersion);
     core2.info(`Current version: ${currentVersion}`);
-    if (diffSearch) {
-      try {
-        const previousContent = await getPreviousFileContent(filePath);
-        if (previousContent) {
-          const fileExtension = filePath.split(".").pop() || "json";
-          const previousData = parseFile(previousContent, fileExtension);
-          const previousVersion = getValueByPath(previousData, query);
-          core2.setOutput("previous_version", previousVersion);
-          core2.info(`Previous version: ${previousVersion}`);
-          const changed = currentVersion !== previousVersion;
-          core2.setOutput("changed", changed.toString());
-          if (changed) {
-            const changeType = determineVersionChangeType(previousVersion, currentVersion);
-            core2.setOutput("type", changeType);
-            core2.info(`Version changed: ${previousVersion} \u2192 ${currentVersion} (${changeType})`);
-          } else {
-            core2.info("Version unchanged");
-          }
+    try {
+      const previousContent = await getPreviousFileContent(filePath);
+      if (previousContent) {
+        const fileExtension = filePath.split(".").pop() || "json";
+        const previousData = parseFile(previousContent, fileExtension);
+        const previousVersion = getValueByPath(previousData, query);
+        core2.setOutput("previous_version", previousVersion);
+        core2.info(`Previous version: ${previousVersion}`);
+        const changed = currentVersion !== previousVersion;
+        core2.setOutput("changed", changed.toString());
+        if (changed) {
+          const changeType = determineVersionChangeType(
+            previousVersion,
+            currentVersion
+          );
+          core2.setOutput("type", changeType);
+          core2.info(
+            `Version changed: ${previousVersion} \u2192 ${currentVersion} (${changeType})`
+          );
         } else {
-          core2.setOutput("changed", "true");
-          core2.info("No previous version found (possibly first commit)");
+          core2.info("Version unchanged");
         }
-      } catch (error) {
-        core2.warning(`Could not get previous version: ${error}`);
-        core2.setOutput("changed", "false");
+      } else {
+        core2.setOutput("changed", "true");
+        core2.info("No previous version found (possibly first commit)");
       }
-    } else {
-      core2.setOutput("changed", "true");
+    } catch (error) {
+      core2.warning(`Could not get previous version: ${error}`);
+      core2.setOutput("changed", "false");
     }
   } catch (error) {
     if (error instanceof Error) {
