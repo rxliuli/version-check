@@ -1,0 +1,82 @@
+name: Release on Version Change
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'package.json'
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.version.outputs.changed }}
+      version: ${{ steps.version.outputs.version }}
+      type: ${{ steps.version.outputs.type }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version change
+        id: version
+        uses: ./
+        with:
+          file: ./package.json
+      - name: Log version info
+        run: |
+          echo "Changed: ${{ steps.version.outputs.changed }}"
+          echo "Version: ${{ steps.version.outputs.version }}"
+          echo "Previous: ${{ steps.version.outputs.previous_version }}"
+          echo "Type: ${{ steps.version.outputs.type }}"
+
+  release:
+    needs: version
+    if: needs.version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 'latest'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install
+      - name: Build
+        run: pnpm build
+      - name: Commit built files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dist/
+          git diff --staged --quiet || git commit -m "chore: update build artifacts for v${{ needs.version.outputs.version }}"
+          git push
+
+      - name: Create and push tags
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          # Create specific version tag
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+
+          # Create/update major version tag (e.g., v1)
+          MAJOR_VERSION=$(echo "${VERSION}" | cut -d. -f1)
+          git tag -fa "v${MAJOR_VERSION}" -m "Update v${MAJOR_VERSION} to v${VERSION}"
+
+          # Push tags
+          git push origin "v${VERSION}"
+          git push origin "v${MAJOR_VERSION}" --force
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+          CHANGE_TYPE: ${{ needs.version.outputs.type }}
+        run: |
+          gh release create "v${VERSION}" \
+            --title "v${VERSION}" \
+            --notes "**Change type:** ${CHANGE_TYPE}
+
+          See [CHANGELOG](https://github.com/${{ github.repository }}/compare/v${VERSION}...HEAD) for details."
