@@ -18,7 +18,7 @@ A GitHub Action to check version changes in any file format (JSON, YAML, TOML, e
 ```yaml
 - uses: actions/checkout@v4
   with:
-    fetch-depth: 2  # Required to access previous commit
+    fetch-depth: 2 # Required to access previous commit
 
 - uses: rxliuli/version-check@v1
   id: version
@@ -87,7 +87,7 @@ A GitHub Action to check version changes in any file format (JSON, YAML, TOML, e
 ```yaml
 - uses: actions/checkout@v4
   with:
-    fetch-depth: 2  # Required to access previous commit for comparison
+    fetch-depth: 2 # Required to access previous commit for comparison
 ```
 
 Without this, the action cannot access the previous commit and will always report `changed: true` with no previous version.
@@ -110,16 +110,16 @@ Without this, the action cannot access the previous commit and will always repor
 
 ## Workflow Examples
 
-### Release Chrome Extension
+### Release Browser Extension
 
 For complex workflows with multiple steps, using separate jobs with `needs` is cleaner than repeating `if` conditions:
 
 ```yaml
 env:
-  DIRECTORY: .output
+  DIRECTORY: .
   PROJECT_NAME: redirector
 
-name: Release Chrome Extension
+name: Release
 
 on:
   push:
@@ -135,18 +135,20 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - name: Check version change
         id: version
         uses: rxliuli/version-check@v1
         with:
-          file: ./package.json
+          file: ${{ env.DIRECTORY }}/package.json
 
   release:
+    permissions:
+      contents: write
     needs: version
     if: needs.version.outputs.changed == 'true'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v3
@@ -160,8 +162,10 @@ jobs:
         run: pnpm install
       - name: Zip extensions
         run: |
-          pnpm run zip
-          pnpm run zip:firefox
+          cd ${{ env.DIRECTORY }}
+          pnpm zip
+          pnpm zip:firefox
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -170,9 +174,76 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            ${{ env.DIRECTORY }}/${{env.PROJECT_NAME}}-${{ needs.version.outputs.version }}-chrome.zip
-            ${{ env.DIRECTORY }}/${{env.PROJECT_NAME}}-${{ needs.version.outputs.version }}-firefox.zip
-            ${{ env.DIRECTORY }}/${{env.PROJECT_NAME}}-${{ needs.version.outputs.version }}-sources.zip
+            ${{ env.DIRECTORY }}/.output/${{ env.PROJECT_NAME }}-${{ needs.version.outputs.version }}-chrome.zip
+            ${{ env.DIRECTORY }}/.output/${{ env.PROJECT_NAME }}-${{ needs.version.outputs.version }}-firefox.zip
+            ${{ env.DIRECTORY }}/.output/${{ env.PROJECT_NAME }}-${{ needs.version.outputs.version }}-sources.zip
+```
+
+### Release Browser Extension on Monorepo
+
+```yaml
+env:
+  DIRECTORY: packages/plugin
+  PROJECT_NAME: mass-block-twitter
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/plugin/package.json'
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.version.outputs.changed }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Check version change
+        id: version
+        uses: rxliuli/version-check@v1
+        with:
+          file: ${{ env.DIRECTORY }}/package.json
+
+  release:
+    permissions:
+      contents: write
+    needs: version
+    if: needs.version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 'latest'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install && pnpm init-all
+      - name: Zip extensions
+        run: |
+          cd ${{ env.DIRECTORY }}
+          pnpm zip
+          pnpm zip:firefox
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: 'v${{ needs.version.outputs.version }}'
+          name: 'v${{ needs.version.outputs.version }}'
+          draft: false
+          prerelease: false
+          files: |
+            ${{ env.DIRECTORY }}/.output/${{ env.PROJECT_NAME }}-${{ needs.version.outputs.version }}-chrome.zip
+            ${{ env.DIRECTORY }}/.output/${{ env.PROJECT_NAME }}-${{ needs.version.outputs.version }}-firefox.zip
+            ${{ env.DIRECTORY }}/.output/${{ env.PROJECT_NAME }}-${{ needs.version.outputs.version }}-sources.zip
 ```
 
 ## How It Works
