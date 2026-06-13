@@ -2,18 +2,31 @@ import * as fs from 'fs/promises'
 import * as YAML from 'yaml'
 import * as TOML from 'toml'
 
+function parsePlist(content: string): Record<string, any> {
+  const result: Record<string, any> = {}
+  const regex = /<key>(.+?)<\/key>\s*(?:<string>(.+?)<\/string>|<(true|false)\s*\/>)/g
+  let match
+  while ((match = regex.exec(content)) !== null) {
+    result[match[1]] = match[3] !== undefined ? match[3] === 'true' : match[2]
+  }
+  return result
+}
+
 export function parseFile(content: string, extension: string): any {
   switch (extension.toLowerCase()) {
     case 'json':
       return JSON.parse(content)
-    
+
     case 'yaml':
     case 'yml':
       return YAML.parse(content)
-    
+
     case 'toml':
       return TOML.parse(content)
-    
+
+    case 'plist':
+      return parsePlist(content)
+
     default:
       throw new Error(`Unsupported file format: ${extension}`)
   }

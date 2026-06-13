@@ -1,6 +1,6 @@
 {
   "name": "version-check",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "A GitHub Action to check version changes in any file format",
   "type": "module",
   "main": "dist/index.js",
@@ -21,7 +21,7 @@
   },
   "lint-staged": {
     "src/**/*.ts": [
-      "pnpm build",
+      "bash -c 'pnpm build'",
       "git add dist"
     ]
   },
