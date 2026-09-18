@@ -1,12 +1,15 @@
 # Version Check
 
-A GitHub Action to check version changes in any file format (JSON, YAML, TOML, etc.)
+A GitHub Action to check version changes in any file format (JSON, YAML, TOML, plist, XcodeGen `project.yml`)
 
 ## Features
 
-- **Multi-format support**: JSON, YAML, TOML
+- **Multi-format support**: JSON, YAML, TOML, plist and XcodeGen `project.yml`
+- **Apple project aware**: Finds `MARKETING_VERSION` in an XcodeGen spec (project or target level,
+  following `$(SETTING)` references) without hand-writing the dot path
+- **Version-preserving parsing**: `MARKETING_VERSION: 1.0` is read as `1.0`, not the YAML number `1`
 - **Automatic version comparison**: Detects changes by comparing with the previous commit
-- **Flexible query paths**: Use dot notation to access nested version fields
+- **Flexible query paths**: Use dot notation to access nested version fields, `*` matches any key
 - **Semantic versioning**: Automatic detection of version change types (major/minor/patch)
 - **Zero configuration**: Works out of the box on all GitHub-hosted runners
 - **TypeScript powered**: Type-safe and well-tested
@@ -80,6 +83,55 @@ A GitHub Action to check version changes in any file format (JSON, YAML, TOML, e
     query: project.version
 ```
 
+#### project.yml (XcodeGen, Swift / Objective-C)
+
+`project.yml` is recognised by its file name, and `MARKETING_VERSION` is located automatically, so
+no `query` is needed:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 2
+- uses: rxliuli/version-check@v1
+  id: version
+  with:
+    file: ./project.yml
+
+- name: Tag the release
+  if: steps.version.outputs.changed == 'true'
+  run: git tag "v${{ steps.version.outputs.version }}"
+```
+
+The setting may live at the project level or per target, and `$(SETTING)` references are followed:
+
+```yaml
+settings:
+  base:
+    MARKETING_VERSION: "0.6.0" # <-- used by default
+
+targets:
+  MyApp:
+    type: application
+    settings:
+      base:
+        MARKETING_VERSION: "0.6.0" # <-- wins over the project level one
+  MyAppTests:
+    type: bundle.unit-test
+    info:
+      properties:
+        CFBundleShortVersionString: "$(MARKETING_VERSION)" # <-- resolved through the reference
+```
+
+When several targets declare different versions, the application target wins and a warning is logged
+with the other values. A different location can always be pinned explicitly:
+
+```yaml
+- uses: rxliuli/version-check@v1
+  with:
+    file: ./project.yml
+    query: targets.MyApp.settings.base.MARKETING_VERSION
+```
+
 ## Important Setup
 
 **⚠️ Required: You must use `fetch-depth: 2` (or higher) with `actions/checkout`**
@@ -94,19 +146,25 @@ Without this, the action cannot access the previous commit and will always repor
 
 ## Inputs
 
-| Input   | Description                                                                 | Required | Default   |
-| ------- | --------------------------------------------------------------------------- | -------- | --------- |
-| `file`  | Path to the file to check (e.g., `./package.json`, `./Cargo.toml`)          | Yes      | -         |
-| `query` | Dot-notation path to the version field (e.g., `version`, `package.version`) | No       | `version` |
+| Input    | Description                                                                                                                                                        | Required | Default |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------- |
+| `file`   | Path to the file to check (e.g., `./package.json`, `./Cargo.toml`, `./project.yml`)                                                                                | Yes      | -       |
+| `query`  | Dot-notation path to the version field (e.g., `version`, `package.version`, `settings.base.MARKETING_VERSION`). `*` matches any key. Empty uses the format default | No       | -       |
+| `format` | File format: `auto`, `json`, `yaml`, `toml`, `plist` or `xcodegen`. `auto` detects it from the file name (`project.yml`/`project.yaml` means `xcodegen`)           | No       | `auto`  |
+
+With an empty `query`, the action looks for `version` in JSON/YAML/TOML/plist files and for the
+`MARKETING_VERSION` build setting in XcodeGen specs (`CFBundleShortVersionString` is used as a
+fallback, which also makes a bare `Info.plist` work).
 
 ## Outputs
 
-| Output             | Description                                                   |
-| ------------------ | ------------------------------------------------------------- |
-| `changed`          | Whether the version changed (`true`/`false`)                  |
-| `version`          | Current version number                                        |
-| `previous_version` | Previous version number                                       |
-| `type`             | Type of version change (`major`/`minor`/`patch`/`prerelease`) |
+| Output             | Description                                                               |
+| ------------------ | ------------------------------------------------------------------------- |
+| `changed`          | Whether the version changed (`true`/`false`)                              |
+| `version`          | Current version number                                                    |
+| `previous_version` | Previous version number                                                   |
+| `type`             | Type of version change (`major`/`minor`/`patch`/`prerelease`)             |
+| `path`             | Where the version was read from (e.g., `settings.base.MARKETING_VERSION`) |
 
 ## Workflow Examples
 
@@ -248,18 +306,22 @@ jobs:
 
 ## How It Works
 
-1. **Parse file format**: Automatically detects JSON, YAML, or TOML based on file extension
-2. **Extract version**: Uses dot notation to navigate nested objects (e.g., `info.version`)
+1. **Parse file format**: Automatically detects JSON, YAML, TOML, plist or an XcodeGen spec based on
+   the file name. YAML plain scalars keep their source text, so `1.0` is not reduced to `1`
+2. **Extract version**: Uses dot notation to navigate nested objects (e.g., `info.version`), or locates
+   `MARKETING_VERSION` in an Apple project (following `$(SETTING)` references)
 3. **Compare with previous**: Automatically compares with the previous Git commit
 4. **Determine change type**: Uses semantic versioning rules to classify the change
 
 ## Supported File Formats
 
-| Format | Extensions      | Example Query               |
-| ------ | --------------- | --------------------------- |
-| JSON   | `.json`         | `version` or `info.version` |
-| YAML   | `.yml`, `.yaml` | `info.version`              |
-| TOML   | `.toml`         | `package.version`           |
+| Format   | Extensions / file name        | Example Query                               |
+| -------- | ----------------------------- | ------------------------------------------- |
+| JSON     | `.json`                       | `version` or `info.version`                 |
+| YAML     | `.yml`, `.yaml`               | `info.version`                              |
+| TOML     | `.toml`                       | `package.version`                           |
+| plist    | `.plist`                      | `CFBundleShortVersionString`                |
+| XcodeGen | `project.yml`, `project.yaml` | `targets.*.settings.base.MARKETING_VERSION` |
 
 ## Development
 

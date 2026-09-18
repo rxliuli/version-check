@@ -1,55 +1,64 @@
 import * as core from '@actions/core'
-import { parseFile, extractVersion } from './parsers'
+import { detectFormat, extractVersion, parseFile, resolveVersion, type ResolvedVersion } from './parsers'
 import { getPreviousFileContent } from './git'
 import { determineVersionChangeType } from './version'
+
+function reportAlternatives(filePath: string, resolved: ResolvedVersion): void {
+  if (resolved.alternatives.length === 0) return
+  const others = resolved.alternatives.map((item) => `${item.version} (${item.path})`).join(', ')
+  core.warning(`Other versions found in ${filePath}, make sure they are intended to differ: ${others}`)
+}
 
 async function run(): Promise<void> {
   try {
     const filePath = core.getInput('file', { required: true })
-    const query = core.getInput('query') || 'version'
+    const query = core.getInput('query').trim()
+    const format = detectFormat(filePath, core.getInput('format'))
 
     core.info(`Checking version in file: ${filePath}`)
-    core.info(`Query path: ${query}`)
+    core.info(`Format: ${format}`)
+    if (query) core.info(`Query path: ${query}`)
 
     // Get current version
-    const currentVersion = await extractVersion(filePath, query)
-    core.setOutput('version', currentVersion)
-    core.info(`Current version: ${currentVersion}`)
+    const current = await extractVersion(filePath, { query, format })
+    core.setOutput('version', current.version)
+    core.setOutput('path', current.path)
+    core.info(`Current version: ${current.version} (from ${current.path})`)
+    reportAlternatives(filePath, current)
 
     try {
       // Get previous file content
       const previousContent = await getPreviousFileContent(filePath)
 
-      if (previousContent) {
-        // Parse previous version
-        const fileExtension = filePath.split('.').pop() || 'json'
-        const previousData = parseFile(previousContent, fileExtension)
-        const previousVersion = getValueByPath(previousData, query)
-
-        core.setOutput('previous_version', previousVersion)
-        core.info(`Previous version: ${previousVersion}`)
-
-        // Compare versions
-        const changed = currentVersion !== previousVersion
-        core.setOutput('changed', changed.toString())
-
-        if (changed) {
-          // Determine version change type
-          const changeType = determineVersionChangeType(
-            previousVersion,
-            currentVersion,
-          )
-          core.setOutput('type', changeType)
-          core.info(
-            `Version changed: ${previousVersion} → ${currentVersion} (${changeType})`,
-          )
-        } else {
-          core.info('Version unchanged')
-        }
-      } else {
+      if (!previousContent) {
         // No previous version found - cannot determine if changed
         core.setOutput('changed', 'false')
         core.info('No previous version found - cannot determine version change')
+        return
+      }
+
+      // Parse previous version with the same query so both sides stay comparable
+      const previous = resolveVersion(parseFile(previousContent, format), { query, format })
+      core.setOutput('previous_version', previous.version)
+      core.info(`Previous version: ${previous.version} (from ${previous.path})`)
+
+      const changed = previous.version !== current.version
+      core.setOutput('changed', changed.toString())
+
+      if (!changed) {
+        core.info('Version unchanged')
+        return
+      }
+
+      const changeType = determineVersionChangeType(previous.version, current.version)
+      core.setOutput('type', changeType)
+      core.info(`Version changed: ${previous.version} → ${current.version} (${changeType})`)
+
+      if (previous.path !== current.path) {
+        core.warning(
+          `The version was read from a different place than in the previous commit ` +
+            `(${previous.path} → ${current.path}), make sure that is intended`,
+        )
       }
     } catch (error) {
       core.warning(`Could not get previous version: ${error}`)
@@ -62,21 +71,6 @@ async function run(): Promise<void> {
       core.setFailed('An unknown error occurred')
     }
   }
-}
-
-function getValueByPath(obj: any, path: string): string {
-  const keys = path.split('.')
-  let current = obj
-
-  for (const key of keys) {
-    if (current && typeof current === 'object' && key in current) {
-      current = current[key]
-    } else {
-      throw new Error(`Path "${path}" not found in object`)
-    }
-  }
-
-  return String(current)
 }
 
 run()

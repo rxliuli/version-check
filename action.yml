@@ -1,5 +1,5 @@
 name: 'Version Check'
-description: 'Check version changes in any file format (JSON, YAML, TOML, XML)'
+description: 'Check version changes in any file format (JSON, YAML, TOML, plist, XcodeGen project.yml)'
 author: 'rxliuli'
 
 branding:
@@ -8,12 +8,22 @@ branding:
 
 inputs:
   file:
-    description: 'Path to the file to check (e.g., ./package.json, ./Cargo.toml)'
+    description: 'Path to the file to check (e.g., ./package.json, ./Cargo.toml, ./project.yml)'
     required: true
   query:
-    description: 'Dot-notation path to the version field (e.g., "version" or "package.version")'
+    description: >
+      Dot-notation path to the version field (e.g., "version", "package.version",
+      "settings.base.MARKETING_VERSION"). "*" matches any key. Defaults to "version" for
+      JSON/YAML/TOML/plist files and to the MARKETING_VERSION build setting for XcodeGen
+      project.yml files.
     required: false
-    default: 'version'
+    default: ''
+  format:
+    description: >
+      File format: auto (default), json, yaml, toml, plist or xcodegen. Auto-detected from the
+      file name, where project.yml/project.yaml is treated as an XcodeGen spec.
+    required: false
+    default: 'auto'
 
 outputs:
   changed:
@@ -24,6 +34,8 @@ outputs:
     description: 'Previous version number'
   type:
     description: 'Type of version change (major/minor/patch/prerelease)'
+  path:
+    description: 'Path the version was read from (e.g., settings.base.MARKETING_VERSION)'
 
 runs:
   using: 'node24'
