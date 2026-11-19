@@ -4,14 +4,29 @@ export function compareVersions(v1: string, v2: string): number {
   // Try semantic versioning first
   const sv1 = semver.valid(v1)
   const sv2 = semver.valid(v2)
-  
+
   if (sv1 && sv2) {
     return semver.compare(sv1, sv2)
   }
-  
-  // Fallback to string comparison
+
   if (v1 === v2) return 0
-  return v1 > v2 ? 1 : -1
+
+  // Fallback: numeric dot-separated comparison so e.g. "1.10" > "1.9"
+  const p1 = v1.split('.')
+  const p2 = v2.split('.')
+  const len = Math.max(p1.length, p2.length)
+  for (let i = 0; i < len; i++) {
+    const s1 = p1[i] ?? '0'
+    const s2 = p2[i] ?? '0'
+    if (/^\d+$/.test(s1) && /^\d+$/.test(s2)) {
+      const n1 = Number(s1)
+      const n2 = Number(s2)
+      if (n1 !== n2) return n1 > n2 ? 1 : -1
+    } else if (s1 !== s2) {
+      return s1 > s2 ? 1 : -1
+    }
+  }
+  return 0
 }
 
 export function determineVersionChangeType(

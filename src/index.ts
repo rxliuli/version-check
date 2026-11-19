@@ -1,7 +1,7 @@
 import * as core from '@actions/core'
 import { detectFormat, extractVersion, parseFile, resolveVersion, type ResolvedVersion } from './parsers'
 import { getPreviousFileContent } from './git'
-import { determineVersionChangeType } from './version'
+import { compareVersions, determineVersionChangeType } from './version'
 
 function reportAlternatives(filePath: string, resolved: ResolvedVersion): void {
   if (resolved.alternatives.length === 0) return
@@ -14,6 +14,7 @@ async function run(): Promise<void> {
     const filePath = core.getInput('file', { required: true })
     const query = core.getInput('query').trim()
     const format = detectFormat(filePath, core.getInput('format'))
+    const base = core.getInput('base').trim()
 
     core.info(`Checking version in file: ${filePath}`)
     core.info(`Format: ${format}`)
@@ -28,7 +29,7 @@ async function run(): Promise<void> {
 
     try {
       // Get previous file content
-      const previousContent = await getPreviousFileContent(filePath)
+      const previousContent = await getPreviousFileContent(filePath, { base: base || undefined })
 
       if (!previousContent) {
         // No previous version found - cannot determine if changed
@@ -42,14 +43,32 @@ async function run(): Promise<void> {
       core.setOutput('previous_version', previous.version)
       core.info(`Previous version: ${previous.version} (from ${previous.path})`)
 
-      const changed = previous.version !== current.version
-      core.setOutput('changed', changed.toString())
-
-      if (!changed) {
+      if (previous.version === current.version) {
+        core.setOutput('changed', 'false')
         core.info('Version unchanged')
         return
       }
 
+      if (compareVersions(current.version, previous.version) < 0) {
+        core.setOutput('changed', 'false')
+        core.setOutput('type', 'downgrade')
+        core.warning(
+          `Version downgraded (${previous.version} → ${current.version}) in ${filePath}: skipping release. Rollbacks must be handled manually on each publishing platform.`,
+        )
+        if (process.env.GITHUB_STEP_SUMMARY) {
+          await core.summary
+            .addHeading('Version Downgrade Detected', 3)
+            .addRaw(
+              `Skipped release for \`${filePath}\`: version downgraded from \`${previous.version}\` to \`${current.version}\`. ` +
+                `Platform rollbacks (e.g. Chrome Web Store, App Store Connect, npm) must be handled manually.`,
+              true,
+            )
+            .write()
+        }
+        return
+      }
+
+      core.setOutput('changed', 'true')
       const changeType = determineVersionChangeType(previous.version, current.version)
       core.setOutput('type', changeType)
       core.info(`Version changed: ${previous.version} → ${current.version} (${changeType})`)

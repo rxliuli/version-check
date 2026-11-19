@@ -8,7 +8,8 @@ A GitHub Action to check version changes in any file format (JSON, YAML, TOML, p
 - **Apple project aware**: Finds `MARKETING_VERSION` in an XcodeGen spec (project or target level,
   following `$(SETTING)` references) without hand-writing the dot path
 - **Version-preserving parsing**: `MARKETING_VERSION: 1.0` is read as `1.0`, not the YAML number `1`
-- **Automatic version comparison**: Detects changes by comparing with the previous commit
+- **Automatic version comparison**: Compares against the push `before` commit (`github.event.before`), PR base (`pull_request.base.sha`), or `HEAD~1`, so multi-commit pushes trigger every bumped package
+- **Downgrade protection**: Ignores version downgrades (`changed: false`, `type: downgrade`) and writes a Job Summary notice instead of failing a release upload
 - **Flexible query paths**: Use dot notation to access nested version fields, `*` matches any key
 - **Semantic versioning**: Automatic detection of version change types (major/minor/patch)
 - **Zero configuration**: Works out of the box on all GitHub-hosted runners
@@ -134,15 +135,19 @@ with the other values. A different location can always be pinned explicitly:
 
 ## Important Setup
 
-**⚠️ Required: You must use `fetch-depth: 2` (or higher) with `actions/checkout`**
+**⚠️ Required: You must use `fetch-depth: 2` (or `fetch-depth: 0`) with `actions/checkout`**
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v5
   with:
-    fetch-depth: 2 # Required to access previous commit for comparison
+    fetch-depth: 2 # Required to access previous commit for comparison (or 0 to skip extra fetches on multi-commit pushes)
 ```
 
-Without this, the action cannot access the previous commit and will always report `changed: true` with no previous version.
+- On **`push`**, the action compares `HEAD` against `github.event.before` (so pushing multiple commits at once—such as bumping two monorepo packages in separate commits, or bumping the same package multiple times—compares the pre-push state to `HEAD`). If `fetch-depth: 2` is used and `before` is older than `HEAD~1`, the action automatically fetches that single base commit from `origin`. Use `fetch-depth: 0` if you want to avoid that extra fetch.
+- On **`pull_request`**, the action compares against `github.event.pull_request.base.sha`.
+- On **`workflow_dispatch`** or initial branch pushes, it falls back to `HEAD~1` (or you can pass `base` explicitly).
+
+Without `fetch-depth: 2` (or higher), the action cannot access `HEAD~1` when falling back and will report `changed: false`.
 
 ## Inputs
 
@@ -151,6 +156,7 @@ Without this, the action cannot access the previous commit and will always repor
 | `file`   | Path to the file to check (e.g., `./package.json`, `./Cargo.toml`, `./project.yml`)                                                                                | Yes      | -       |
 | `query`  | Dot-notation path to the version field (e.g., `version`, `package.version`, `settings.base.MARKETING_VERSION`). `*` matches any key. Empty uses the format default | No       | -       |
 | `format` | File format: `auto`, `json`, `yaml`, `toml`, `plist` or `xcodegen`. `auto` detects it from the file name (`project.yml`/`project.yaml` means `xcodegen`)           | No       | `auto`  |
+| `base`   | Base git ref or commit SHA to compare against. Defaults to `github.event.before` on `push`, `pull_request.base.sha` on `pull_request`, or `HEAD~1`                 | No       | -       |
 
 With an empty `query`, the action looks for `version` in JSON/YAML/TOML/plist files and for the
 `MARKETING_VERSION` build setting in XcodeGen specs (`CFBundleShortVersionString` is used as a
@@ -160,11 +166,18 @@ fallback, which also makes a bare `Info.plist` work).
 
 | Output             | Description                                                               |
 | ------------------ | ------------------------------------------------------------------------- |
-| `changed`          | Whether the version changed (`true`/`false`)                              |
+| `changed`          | Whether the version increased (`true`/`false`; `false` on downgrades)     |
 | `version`          | Current version number                                                    |
 | `previous_version` | Previous version number                                                   |
-| `type`             | Type of version change (`major`/`minor`/`patch`/`prerelease`)             |
+| `type`             | Type of version change (`major`/`minor`/`patch`/`prerelease`/`downgrade`) |
 | `path`             | Where the version was read from (e.g., `settings.base.MARKETING_VERSION`) |
+
+### Downgrade Handling
+
+When the version in `HEAD` is lower than the base version (for example `0.0.5 → 0.0.4`), the action:
+
+- Outputs `changed: false` and `type: downgrade` so downstream release jobs are skipped
+- Emits a workflow warning and writes a **Version Downgrade Detected** notice to the GitHub Actions Job Summary (since rollbacks must be handled manually on platforms like Chrome Web Store, App Store Connect, or npm)
 
 ## Workflow Examples
 
@@ -310,8 +323,8 @@ jobs:
    the file name. YAML plain scalars keep their source text, so `1.0` is not reduced to `1`
 2. **Extract version**: Uses dot notation to navigate nested objects (e.g., `info.version`), or locates
    `MARKETING_VERSION` in an Apple project (following `$(SETTING)` references)
-3. **Compare with previous**: Automatically compares with the previous Git commit
-4. **Determine change type**: Uses semantic versioning rules to classify the change
+3. **Compare with base commit**: Compares against `github.event.before` (on `push`), `pull_request.base.sha` (on `pull_request`), explicit `base`, or `HEAD~1`, fetching the base commit on demand when shallow-cloned
+4. **Determine change type**: Uses semantic versioning rules to classify upgrades and ignores downgrades with a summary warning
 
 ## Supported File Formats
 

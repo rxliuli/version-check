@@ -32329,39 +32329,93 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.resolveBaseRef = resolveBaseRef;
 exports.getPreviousFileContent = getPreviousFileContent;
 const child_process_1 = __nccwpck_require__(7698);
+const fs_1 = __nccwpck_require__(9896);
+const path = __importStar(__nccwpck_require__(6928));
 const core = __importStar(__nccwpck_require__(6966));
-async function getPreviousFileContent(filePath) {
-    try {
-        // Normalize file path (remove leading ./)
-        const normalizedPath = filePath.replace(/^\.\//, '');
-        // Check if HEAD~1 exists (requires fetch-depth >= 2)
+function isNonZeroSha(value) {
+    return typeof value === 'string' && value.trim().length > 0 && !/^0+$/.test(value.trim());
+}
+function resolveBaseRef(options) {
+    const explicitBase = options?.base?.trim();
+    if (explicitBase) {
+        return { ref: explicitBase, source: 'input' };
+    }
+    const eventPath = options?.eventPath ?? process.env.GITHUB_EVENT_PATH;
+    const eventName = options?.eventName ?? process.env.GITHUB_EVENT_NAME;
+    if (eventPath) {
         try {
-            (0, child_process_1.execSync)('git rev-parse HEAD~1', { encoding: 'utf-8', stdio: 'pipe' });
+            const event = JSON.parse((0, fs_1.readFileSync)(eventPath, 'utf-8'));
+            if ((eventName === 'push' || (!eventName && !event.pull_request)) && isNonZeroSha(event.before)) {
+                return { ref: event.before.trim(), source: 'push event before' };
+            }
+            if ((eventName === 'pull_request' || eventName === 'pull_request_target' || !eventName) &&
+                isNonZeroSha(event.pull_request?.base?.sha)) {
+                return { ref: event.pull_request.base.sha.trim(), source: 'pull_request base' };
+            }
         }
-        catch {
-            core.warning('Cannot access previous commit (HEAD~1). ' +
-                'Make sure to use "fetch-depth: 2" or higher with actions/checkout. ' +
-                'See: https://github.com/rxliuli/version-check#important-setup');
-            return null;
+        catch (error) {
+            core.debug(`Could not read GitHub event payload from ${eventPath}: ${error}`);
         }
-        // Check if file was changed in the last commit
-        const changedFiles = (0, child_process_1.execSync)('git diff --name-only HEAD~1..HEAD', {
+    }
+    return { ref: 'HEAD~1', source: 'HEAD~1' };
+}
+function hasCommit(ref, cwd) {
+    try {
+        (0, child_process_1.execFileSync)('git', ['cat-file', '-e', `${ref}^{commit}`], { cwd, stdio: 'pipe' });
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+async function getPreviousFileContent(filePath, options) {
+    try {
+        const normalizedPath = path.posix.normalize(filePath.replace(/\\/g, '/')).replace(/^\.\//, '');
+        const { ref: baseRef, source } = resolveBaseRef(options);
+        const cwd = options?.cwd;
+        core.info(`Comparing against base ref: ${baseRef} (${source})`);
+        if (!hasCommit(baseRef, cwd)) {
+            if (baseRef === 'HEAD~1') {
+                core.warning('Cannot access previous commit (HEAD~1). ' +
+                    'Make sure to use "fetch-depth: 2" or higher with actions/checkout. ' +
+                    'See: https://github.com/rxliuli/version-check#important-setup');
+                return null;
+            }
+            core.info(`Base commit ${baseRef} not found locally; fetching it from origin...`);
+            try {
+                (0, child_process_1.execFileSync)('git', ['fetch', '--no-tags', '--depth=1', 'origin', baseRef], { cwd, stdio: 'pipe' });
+            }
+            catch (error) {
+                core.debug(`Could not fetch base commit ${baseRef} from origin: ${error}`);
+            }
+            if (!hasCommit(baseRef, cwd)) {
+                core.warning(`Cannot access base commit (${baseRef}). ` +
+                    'Make sure to use "fetch-depth: 0" with actions/checkout or ensure the base commit is reachable on origin.');
+                return null;
+            }
+        }
+        const changedFiles = (0, child_process_1.execFileSync)('git', ['-c', 'core.quotepath=false', 'diff', '--name-only', baseRef, 'HEAD'], {
+            cwd,
             encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe'],
         }).trim();
-        if (!changedFiles.split('\n').some(f => f === normalizedPath || f === filePath)) {
-            core.info(`File ${filePath} was not changed in the last commit`);
+        if (!changedFiles ||
+            !changedFiles.split(/\r?\n/).some((f) => f === normalizedPath || f === filePath)) {
+            core.info(`File ${filePath} was not changed since ${baseRef}`);
             return null;
         }
-        // Get file content from previous commit
-        const previousContent = (0, child_process_1.execSync)(`git show HEAD~1:${normalizedPath}`, {
+        const previousContent = (0, child_process_1.execFileSync)('git', ['show', `${baseRef}:${normalizedPath}`], {
+            cwd,
             encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe'],
         });
         return previousContent;
     }
     catch (error) {
-        // File might not exist in previous commit
+        // File might not exist in base commit (e.g. newly added)
         core.debug(`Could not get previous file content: ${error}`);
         return null;
     }
@@ -32423,6 +32477,7 @@ async function run() {
         const filePath = core.getInput('file', { required: true });
         const query = core.getInput('query').trim();
         const format = (0, parsers_1.detectFormat)(filePath, core.getInput('format'));
+        const base = core.getInput('base').trim();
         core.info(`Checking version in file: ${filePath}`);
         core.info(`Format: ${format}`);
         if (query)
@@ -32435,7 +32490,7 @@ async function run() {
         reportAlternatives(filePath, current);
         try {
             // Get previous file content
-            const previousContent = await (0, git_1.getPreviousFileContent)(filePath);
+            const previousContent = await (0, git_1.getPreviousFileContent)(filePath, { base: base || undefined });
             if (!previousContent) {
                 // No previous version found - cannot determine if changed
                 core.setOutput('changed', 'false');
@@ -32446,12 +32501,25 @@ async function run() {
             const previous = (0, parsers_1.resolveVersion)((0, parsers_1.parseFile)(previousContent, format), { query, format });
             core.setOutput('previous_version', previous.version);
             core.info(`Previous version: ${previous.version} (from ${previous.path})`);
-            const changed = previous.version !== current.version;
-            core.setOutput('changed', changed.toString());
-            if (!changed) {
+            if (previous.version === current.version) {
+                core.setOutput('changed', 'false');
                 core.info('Version unchanged');
                 return;
             }
+            if ((0, version_1.compareVersions)(current.version, previous.version) < 0) {
+                core.setOutput('changed', 'false');
+                core.setOutput('type', 'downgrade');
+                core.warning(`Version downgraded (${previous.version} → ${current.version}) in ${filePath}: skipping release. Rollbacks must be handled manually on each publishing platform.`);
+                if (process.env.GITHUB_STEP_SUMMARY) {
+                    await core.summary
+                        .addHeading('Version Downgrade Detected', 3)
+                        .addRaw(`Skipped release for \`${filePath}\`: version downgraded from \`${previous.version}\` to \`${current.version}\`. ` +
+                        `Platform rollbacks (e.g. Chrome Web Store, App Store Connect, npm) must be handled manually.`, true)
+                        .write();
+                }
+                return;
+            }
+            core.setOutput('changed', 'true');
             const changeType = (0, version_1.determineVersionChangeType)(previous.version, current.version);
             core.setOutput('type', changeType);
             core.info(`Version changed: ${previous.version} → ${current.version} (${changeType})`);
@@ -32769,10 +32837,26 @@ function compareVersions(v1, v2) {
     if (sv1 && sv2) {
         return semver.compare(sv1, sv2);
     }
-    // Fallback to string comparison
     if (v1 === v2)
         return 0;
-    return v1 > v2 ? 1 : -1;
+    // Fallback: numeric dot-separated comparison so e.g. "1.10" > "1.9"
+    const p1 = v1.split('.');
+    const p2 = v2.split('.');
+    const len = Math.max(p1.length, p2.length);
+    for (let i = 0; i < len; i++) {
+        const s1 = p1[i] ?? '0';
+        const s2 = p2[i] ?? '0';
+        if (/^\d+$/.test(s1) && /^\d+$/.test(s2)) {
+            const n1 = Number(s1);
+            const n2 = Number(s2);
+            if (n1 !== n2)
+                return n1 > n2 ? 1 : -1;
+        }
+        else if (s1 !== s2) {
+            return s1 > s2 ? 1 : -1;
+        }
+    }
+    return 0;
 }
 function determineVersionChangeType(previousVersion, currentVersion) {
     // Try semantic versioning

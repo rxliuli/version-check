@@ -24,16 +24,22 @@ inputs:
       file name, where project.yml/project.yaml is treated as an XcodeGen spec.
     required: false
     default: 'auto'
+  base:
+    description: >
+      Base git ref/commit to compare against. Defaults to github.event.before on push,
+      github.event.pull_request.base.sha on pull_request, or HEAD~1 otherwise.
+    required: false
+    default: ''
 
 outputs:
   changed:
-    description: 'Whether the version changed (true/false)'
+    description: 'Whether the version increased (true/false; false on downgrades)'
   version:
     description: 'Current version number'
   previous_version:
     description: 'Previous version number'
   type:
-    description: 'Type of version change (major/minor/patch/prerelease)'
+    description: 'Type of version change (major/minor/patch/prerelease/downgrade)'
   path:
     description: 'Path the version was read from (e.g., settings.base.MARKETING_VERSION)'
 
