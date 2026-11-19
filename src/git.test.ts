@@ -2,6 +2,7 @@ import { execFileSync } from 'child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import * as path from 'path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { getPreviousFileContent, resolveBaseRef } from './git'
 
@@ -236,7 +237,7 @@ describe('getPreviousFileContent with shallow clones', () => {
 })
 
 describe('dist/index.js end-to-end execution', () => {
-  const distIndexJs = path.resolve(__dirname, '..', 'dist', 'index.js')
+  const distIndexJs = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'index.js')
 
   function runAction(
     cwd: string,
