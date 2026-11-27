@@ -1,5 +1,5 @@
 name: 'Version Check'
-description: 'Check version changes in any file format (JSON, YAML, TOML, plist, XcodeGen project.yml)'
+description: 'Check version changes in any file format (JSON, YAML, TOML, plist, Xcode project.xcproj, XcodeGen project.yml)'
 author: 'rxliuli'
 
 branding:
@@ -8,20 +8,21 @@ branding:
 
 inputs:
   file:
-    description: 'Path to the file to check (e.g., ./package.json, ./Cargo.toml, ./project.yml)'
+    description: 'Path to the file to check (e.g., ./package.json, ./Cargo.toml, ./MyApp.xcodeproj/project.xcproj, ./project.yml)'
     required: true
   query:
     description: >
       Dot-notation path to the version field (e.g., "version", "package.version",
-      "settings.base.MARKETING_VERSION"). "*" matches any key. Defaults to "version" for
-      JSON/YAML/TOML/plist files and to the MARKETING_VERSION build setting for XcodeGen
-      project.yml files.
+      "build-settings.MARKETING_VERSION", "settings.base.MARKETING_VERSION"). "*" matches any key.
+      Defaults to "version" for JSON/YAML/TOML/plist files and to the MARKETING_VERSION build
+      setting for Xcode project.xcproj and XcodeGen project.yml files.
     required: false
     default: ''
   format:
     description: >
-      File format: auto (default), json, yaml, toml, plist or xcodegen. Auto-detected from the
-      file name, where project.yml/project.yaml is treated as an XcodeGen spec.
+      File format: auto (default), json, yaml, toml, plist, xcodegen or xcproj. Auto-detected from
+      the file name, where *.xcproj/*.xcodeproj means Xcode JSON project format and
+      project.yml/project.yaml means an XcodeGen spec.
     required: false
     default: 'auto'
   base:

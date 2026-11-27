@@ -372,4 +372,74 @@ describe('dist/index.js end-to-end execution', () => {
     expect(outputs.previous_version).toBeUndefined()
     expect(stdout).toContain('::warning::Cannot access base commit (deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)')
   })
+
+  it('detects version upgrades in Xcode project.xcproj via both file path and .xcodeproj bundle path', () => {
+    const renderXcproj = (version: string) => `{
+  // Xcode 27.2 JSON5 project format
+  "default-configuration": "Release",
+  "configurations": [
+    "Debug",
+    "Release",
+  ],
+  "localizations": {
+    "development": "en",
+  },
+  "files": [],
+  "targets": [
+    {
+      "name": "MyApp",
+      "id": "AAA111",
+      "product-type": "application",
+      "build-settings": {
+        "MARKETING_VERSION": "${version}",
+      },
+    },
+  ],
+}
+`
+    const origin = createOriginRepo()
+    const xcprojPath = path.join(origin, 'MyApp.xcodeproj', 'project.xcproj')
+    mkdirSync(path.dirname(xcprojPath), { recursive: true })
+    writeFileSync(xcprojPath, renderXcproj('1.2.0'), 'utf-8')
+    git(origin, 'add', '.')
+    git(origin, 'commit', '-m', 'v1.2.0')
+    const beforeSha = git(origin, 'rev-parse', 'HEAD')
+
+    writeFileSync(xcprojPath, renderXcproj('1.3.0'), 'utf-8')
+    git(origin, 'add', '.')
+    git(origin, 'commit', '-m', 'bump to 1.3.0')
+
+    const cloneParent = makeTempDir('vc-clone-')
+    const clone = path.join(cloneParent, 'repo')
+    git(cloneParent, 'clone', '--depth=2', `file://${origin}`, 'repo')
+
+    const eventPath = path.join(cloneParent, 'event.json')
+    writeJson(eventPath, { before: beforeSha })
+
+    const fromFile = runAction(clone, {
+      INPUT_FILE: './MyApp.xcodeproj/project.xcproj',
+      GITHUB_EVENT_NAME: 'push',
+      GITHUB_EVENT_PATH: eventPath,
+    })
+    expect(fromFile.outputs).toMatchObject({
+      changed: 'true',
+      previous_version: '1.2.0',
+      version: '1.3.0',
+      type: 'minor',
+      path: 'targets.MyApp.build-settings.MARKETING_VERSION',
+    })
+
+    const fromBundle = runAction(clone, {
+      INPUT_FILE: './MyApp.xcodeproj',
+      GITHUB_EVENT_NAME: 'push',
+      GITHUB_EVENT_PATH: eventPath,
+    })
+    expect(fromBundle.outputs).toMatchObject({
+      changed: 'true',
+      previous_version: '1.2.0',
+      version: '1.3.0',
+      type: 'minor',
+      path: 'targets.MyApp.build-settings.MARKETING_VERSION',
+    })
+  })
 })

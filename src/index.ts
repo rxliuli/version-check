@@ -1,5 +1,12 @@
 import * as core from '@actions/core'
-import { detectFormat, extractVersion, parseFile, resolveVersion, type ResolvedVersion } from './parsers'
+import {
+  detectFormat,
+  extractVersion,
+  parseFile,
+  resolveProjectFilePath,
+  resolveVersion,
+  type ResolvedVersion,
+} from './parsers'
 import { getPreviousFileContent } from './git'
 import { compareVersions, determineVersionChangeType } from './version'
 
@@ -11,7 +18,7 @@ function reportAlternatives(filePath: string, resolved: ResolvedVersion): void {
 
 async function run(): Promise<void> {
   try {
-    const filePath = core.getInput('file', { required: true })
+    const filePath = resolveProjectFilePath(core.getInput('file', { required: true }))
     const query = core.getInput('query').trim()
     const format = detectFormat(filePath, core.getInput('format'))
     const base = core.getInput('base').trim()

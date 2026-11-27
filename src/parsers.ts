@@ -1,11 +1,12 @@
 import * as fs from 'fs/promises'
 import * as path from 'path'
+import JSON5 from 'json5'
 import * as YAML from 'yaml'
 import * as TOML from 'toml'
 import { APPLE_VERSION_KEYS, resolveAppleVersion, type VersionCandidate } from './xcodegen'
 import { isPlainObject } from './utils'
 
-export type FileFormat = 'json' | 'yaml' | 'toml' | 'plist' | 'xcodegen'
+export type FileFormat = 'json' | 'yaml' | 'toml' | 'plist' | 'xcodegen' | 'xcproj'
 
 /** XcodeGen specs, treated as Apple projects rather than plain YAML. */
 const APPLE_PROJECT_FILES = ['project.yml', 'project.yaml']
@@ -19,9 +20,24 @@ const FORMAT_ALIASES: Record<string, FileFormat> = {
   xcodegen: 'xcodegen',
   xcode: 'xcodegen',
   apple: 'xcodegen',
+  xcproj: 'xcproj',
+  xcodeproj: 'xcproj',
 }
 
-const SUPPORTED_FORMATS = 'json, yaml, toml, plist, xcodegen'
+const SUPPORTED_FORMATS = 'json, yaml, toml, plist, xcodegen, xcproj'
+
+/**
+ * If `filePath` points to an `.xcodeproj` bundle directory (e.g. `./MyApp.xcodeproj`),
+ * resolve it to the JSON project file inside it (`./MyApp.xcodeproj/project.xcproj`).
+ */
+export function resolveProjectFilePath(filePath: string): string {
+  const trimmed = filePath.replace(/[\\/]+$/, '')
+  if (path.extname(trimmed).toLowerCase() === '.xcodeproj') {
+    const sep = trimmed.includes('\\') && !trimmed.includes('/') ? '\\' : '/'
+    return `${trimmed}${sep}project.xcproj`
+  }
+  return filePath
+}
 
 export function normalizeFormat(format: string): FileFormat {
   const normalized = format.trim().toLowerCase()
@@ -36,9 +52,10 @@ export function detectFormat(filePath: string, format = ''): FileFormat {
   const requested = format.trim().toLowerCase()
   if (requested && requested !== 'auto') return normalizeFormat(requested)
 
-  if (APPLE_PROJECT_FILES.includes(path.basename(filePath).toLowerCase())) return 'xcodegen'
+  const cleanPath = filePath.replace(/[\\/]+$/, '')
+  if (APPLE_PROJECT_FILES.includes(path.basename(cleanPath).toLowerCase())) return 'xcodegen'
 
-  const extension = path.extname(filePath).slice(1)
+  const extension = path.extname(cleanPath).slice(1)
   if (!extension) {
     throw new Error(`Cannot determine the format of "${filePath}" from its name. Pass "format" explicitly.`)
   }
@@ -113,6 +130,9 @@ export function parseFile(content: string, format: FileFormat | string): unknown
     case 'json':
       return JSON.parse(content)
 
+    case 'xcproj':
+      return JSON5.parse(content)
+
     case 'yaml':
     case 'xcodegen':
       return parseYaml(content)
@@ -133,7 +153,7 @@ function searchPath(node: unknown, keys: string[]): unknown {
   const [key, ...rest] = keys
   if (key === '*') {
     // Wildcard: the first match wins, so `targets.*.settings.base.MARKETING_VERSION`
-    // works without knowing the target name.
+    // and `targets.*.build-settings.MARKETING_VERSION` work without knowing the target name.
     const children = Array.isArray(node) ? node : isPlainObject(node) ? Object.values(node) : []
     for (const child of children) {
       const value = searchPath(child, rest)
@@ -142,8 +162,24 @@ function searchPath(node: unknown, keys: string[]): unknown {
     return NOT_FOUND
   }
 
-  if (node !== null && typeof node === 'object' && key in node) {
-    return searchPath((node as Record<string, unknown>)[key], rest)
+  if (Array.isArray(node)) {
+    if (/^\d+$/.test(key)) {
+      const index = Number(key)
+      return index < node.length ? searchPath(node[index], rest) : NOT_FOUND
+    }
+    const named = node.find((item) => isPlainObject(item) && item.name === key)
+    return named !== undefined ? searchPath(named, rest) : NOT_FOUND
+  }
+
+  if (isPlainObject(node)) {
+    if (key in node) {
+      return searchPath(node[key], rest)
+    }
+    // Support literal keys containing dots, e.g. `MARKETING_VERSION[sdk=iphoneos18.0]`.
+    const fullKey = keys.join('.')
+    if (fullKey in node) {
+      return node[fullKey]
+    }
   }
   return NOT_FOUND
 }
@@ -183,9 +219,11 @@ export function resolveVersion(data: unknown, options: VersionQuery = {}): Resol
     return { version: toVersionString(getValueByPath(data, query), query), path: query, alternatives: [] }
   }
 
-  // `version` is the convention for JSON/YAML/TOML files, but XcodeGen keeps it
-  // in a build setting and Info.plist uses `CFBundleShortVersionString`.
-  if (format !== 'xcodegen') {
+  // `version` is the convention for JSON/YAML/TOML files, while XcodeGen and
+  // Xcode `project.xcproj` keep it in a build setting and Info.plist uses
+  // `CFBundleShortVersionString`.
+  const isAppleProject = format === 'xcodegen' || format === 'xcproj'
+  if (!isAppleProject) {
     try {
       return { version: toVersionString(getValueByPath(data, 'version'), 'version'), path: 'version', alternatives: [] }
     } catch (error) {
@@ -201,14 +239,38 @@ export function resolveVersion(data: unknown, options: VersionQuery = {}): Resol
   const apple = resolveAppleVersion(data)
   if (apple) return apple
 
+  const projectLabel = format === 'xcproj' ? 'Xcode project' : 'XcodeGen project'
+  const examplePath = format === 'xcproj' ? 'build-settings.MARKETING_VERSION' : 'settings.base.MARKETING_VERSION'
   throw new Error(
-    `No ${APPLE_VERSION_KEYS.join(' / ')} found in the XcodeGen project. ` +
-      'Pass "query" with an explicit path, e.g. settings.base.MARKETING_VERSION',
+    `No ${APPLE_VERSION_KEYS.join(' / ')} found in the ${projectLabel}. ` +
+      `Pass "query" with an explicit path, e.g. ${examplePath}`,
   )
 }
 
 export async function extractVersion(filePath: string, options: VersionQuery = {}): Promise<ResolvedVersion> {
-  const content = await fs.readFile(filePath, 'utf-8')
-  const format = detectFormat(filePath, options.format)
+  const resolvedPath = resolveProjectFilePath(filePath)
+  let content: string
+  try {
+    content = await fs.readFile(resolvedPath, 'utf-8')
+  } catch (error) {
+    if (
+      (error as NodeJS.ErrnoException).code === 'ENOENT' &&
+      path.basename(resolvedPath).toLowerCase() === 'project.xcproj' &&
+      path.extname(path.dirname(resolvedPath)).toLowerCase() === '.xcodeproj'
+    ) {
+      const legacyPath = path.join(path.dirname(resolvedPath), 'project.pbxproj')
+      try {
+        await fs.access(legacyPath)
+      } catch {
+        throw error
+      }
+      throw new Error(
+        `No "project.xcproj" found inside "${path.dirname(resolvedPath)}" (only legacy "project.pbxproj" was found). ` +
+          'Convert the project to Xcode\'s JSON format (Xcode 27.2+) or check an XcodeGen project.yml / Info.plist instead.',
+      )
+    }
+    throw error
+  }
+  const format = detectFormat(resolvedPath, options.format)
   return resolveVersion(parseFile(content, format), { ...options, format })
 }

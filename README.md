@@ -1,12 +1,11 @@
 # Version Check
 
-A GitHub Action to check version changes in any file format (JSON, YAML, TOML, plist, XcodeGen `project.yml`)
+A GitHub Action to check version changes in any file format (JSON, YAML, TOML, plist, Xcode `project.xcproj`, XcodeGen `project.yml`)
 
 ## Features
 
-- **Multi-format support**: JSON, YAML, TOML, plist and XcodeGen `project.yml`
-- **Apple project aware**: Finds `MARKETING_VERSION` in an XcodeGen spec (project or target level,
-  following `$(SETTING)` references) without hand-writing the dot path
+- **Multi-format support**: JSON, YAML, TOML, plist, Xcode JSON `project.xcproj` (Xcode 27.2+), and XcodeGen `project.yml`
+- **Apple project aware**: Finds `MARKETING_VERSION` in Xcode `project.xcproj` (JSON5, project/target `build-settings`, conditional `[config=Release]` keys) and XcodeGen `project.yml` (following `$(SETTING)` references) without hand-writing the dot path
 - **Version-preserving parsing**: `MARKETING_VERSION: 1.0` is read as `1.0`, not the YAML number `1`
 - **Automatic version comparison**: Compares against the push `before` commit (`github.event.before`), PR base (`pull_request.base.sha`), or `HEAD~1`, so multi-commit pushes trigger every bumped package
 - **Downgrade protection**: Ignores version downgrades (`changed: false`, `type: downgrade`) and writes a Job Summary notice instead of failing a release upload
@@ -84,6 +83,35 @@ A GitHub Action to check version changes in any file format (JSON, YAML, TOML, p
     query: project.version
 ```
 
+#### project.xcproj (Xcode JSON project format, Xcode 27.2+)
+
+Xcode 27.2 introduced a JSON5-based [project configuration file format](https://developer.apple.com/documentation/xcode/updating-your-xcode-project-configuration-file-format) (`MyApp.xcodeproj/project.xcproj`). Pass either the `project.xcproj` file or the `.xcodeproj` bundle directly—`MARKETING_VERSION` is located automatically without a `query`:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 2
+- uses: rxliuli/version-check@v1
+  id: version
+  with:
+    file: ./MyApp.xcodeproj/project.xcproj
+    # Or pass the bundle path directly:
+    # file: ./MyApp.xcodeproj
+
+- name: Tag the release
+  if: steps.version.outputs.changed == 'true'
+  run: git tag "v${{ steps.version.outputs.version }}"
+```
+
+JSON5 syntax (trailing commas and comments) and conditional build setting keys (such as `MARKETING_VERSION[config=Release]` vs `MARKETING_VERSION[config=Debug]`) are handled automatically. Target-level settings on `application` targets take precedence over project-level settings, and `Release` / unconditional settings take precedence over `Debug` overrides. You can also pin a target explicitly by name or index:
+
+```yaml
+- uses: rxliuli/version-check@v1
+  with:
+    file: ./MyApp.xcodeproj/project.xcproj
+    query: targets.MyApp.build-settings.MARKETING_VERSION
+```
+
 #### project.yml (XcodeGen, Swift / Objective-C)
 
 `project.yml` is recognised by its file name, and `MARKETING_VERSION` is located automatically, so
@@ -151,16 +179,17 @@ Without `fetch-depth: 2` (or higher), the action cannot access `HEAD~1` when fal
 
 ## Inputs
 
-| Input    | Description                                                                                                                                                        | Required | Default |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------- |
-| `file`   | Path to the file to check (e.g., `./package.json`, `./Cargo.toml`, `./project.yml`)                                                                                | Yes      | -       |
-| `query`  | Dot-notation path to the version field (e.g., `version`, `package.version`, `settings.base.MARKETING_VERSION`). `*` matches any key. Empty uses the format default | No       | -       |
-| `format` | File format: `auto`, `json`, `yaml`, `toml`, `plist` or `xcodegen`. `auto` detects it from the file name (`project.yml`/`project.yaml` means `xcodegen`)           | No       | `auto`  |
-| `base`   | Base git ref or commit SHA to compare against. Defaults to `github.event.before` on `push`, `pull_request.base.sha` on `pull_request`, or `HEAD~1`                 | No       | -       |
+| Input    | Description                                                                                                                                                                     | Required | Default |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- |
+| `file`   | Path to the file to check (e.g., `./package.json`, `./Cargo.toml`, `./MyApp.xcodeproj/project.xcproj`, `./project.yml`)                                                         | Yes      | -       |
+| `query`  | Dot-notation path to the version field (e.g., `version`, `package.version`, `build-settings.MARKETING_VERSION`, `settings.base.MARKETING_VERSION`). `*` matches any key. Empty uses the format default | No       | -       |
+| `format` | File format: `auto`, `json`, `yaml`, `toml`, `plist`, `xcodegen` or `xcproj`. `auto` detects it from the file name (`*.xcproj`/`*.xcodeproj` means `xcproj`, `project.yml`/`project.yaml` means `xcodegen`) | No       | `auto`  |
+| `base`   | Base git ref or commit SHA to compare against. Defaults to `github.event.before` on `push`, `pull_request.base.sha` on `pull_request`, or `HEAD~1`                              | No       | -       |
 
 With an empty `query`, the action looks for `version` in JSON/YAML/TOML/plist files and for the
-`MARKETING_VERSION` build setting in XcodeGen specs (`CFBundleShortVersionString` is used as a
-fallback, which also makes a bare `Info.plist` work).
+`MARKETING_VERSION` build setting in Xcode `project.xcproj` and XcodeGen `project.yml` files
+(`CFBundleShortVersionString` / `INFOPLIST_KEY_CFBundleShortVersionString` are used as fallbacks,
+which also makes a bare `Info.plist` work).
 
 ## Outputs
 
@@ -319,22 +348,22 @@ jobs:
 
 ## How It Works
 
-1. **Parse file format**: Automatically detects JSON, YAML, TOML, plist or an XcodeGen spec based on
-   the file name. YAML plain scalars keep their source text, so `1.0` is not reduced to `1`
+1. **Parse file format**: Automatically detects JSON, YAML, TOML, plist, Xcode `project.xcproj` (JSON5), or XcodeGen `project.yml` based on the file name. YAML plain scalars keep their source text, so `1.0` is not reduced to `1`
 2. **Extract version**: Uses dot notation to navigate nested objects (e.g., `info.version`), or locates
-   `MARKETING_VERSION` in an Apple project (following `$(SETTING)` references)
+   `MARKETING_VERSION` in an Apple project (following `$(SETTING)` references and conditional `[config=Release]` build settings)
 3. **Compare with base commit**: Compares against `github.event.before` (on `push`), `pull_request.base.sha` (on `pull_request`), explicit `base`, or `HEAD~1`, fetching the base commit on demand when shallow-cloned
 4. **Determine change type**: Uses semantic versioning rules to classify upgrades and ignores downgrades with a summary warning
 
 ## Supported File Formats
 
-| Format   | Extensions / file name        | Example Query                               |
-| -------- | ----------------------------- | ------------------------------------------- |
-| JSON     | `.json`                       | `version` or `info.version`                 |
-| YAML     | `.yml`, `.yaml`               | `info.version`                              |
-| TOML     | `.toml`                       | `package.version`                           |
-| plist    | `.plist`                      | `CFBundleShortVersionString`                |
-| XcodeGen | `project.yml`, `project.yaml` | `targets.*.settings.base.MARKETING_VERSION` |
+| Format   | Extensions / file name                     | Example Query                               |
+| -------- | ------------------------------------------ | ------------------------------------------- |
+| JSON     | `.json`                                    | `version` or `info.version`                 |
+| YAML     | `.yml`, `.yaml`                            | `info.version`                              |
+| TOML     | `.toml`                                    | `package.version`                           |
+| plist    | `.plist`                                   | `CFBundleShortVersionString`                |
+| Xcode    | `project.xcproj`, `.xcproj`, `.xcodeproj`  | `targets.MyApp.build-settings.MARKETING_VERSION` |
+| XcodeGen | `project.yml`, `project.yaml`              | `targets.*.settings.base.MARKETING_VERSION` |
 
 ## Development
 
